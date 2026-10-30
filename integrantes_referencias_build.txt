@@ -1,0 +1,97 @@
+BOOKLOG SCAN
+Computação Visual — Turma 07G — Universidade Presbiteriana Mackenzie
+Professor: André Kishimoto
+Projeto 2 — Opção 4: Aplicação prática (software)
+
+=====================================================================
+INTEGRANTES
+=====================================================================
+Gabriel Nottoli Buck — RA 10425384
+Julia Andrade — RA 10427828
+
+=====================================================================
+REFERÊNCIAS
+=====================================================================
+Bibliografia da disciplina
+
+GONZALEZ, Rafael C.; WOODS, Richard E. Processamento Digital de Imagens.
+3ª ed. Pearson Prentice Hall, 2010.
+  Usada em: transformações de intensidade (gama, alongamento de contraste),
+  histograma e equalização, filtragem espacial (suavização gaussiana),
+  detecção de bordas, interpolação e transformações geométricas.
+
+MAJUMDER, Aditi; GOPI, M. Introduction to Visual Computing: Core Concepts in
+Computer Vision, Graphics, and Image Processing. CRC Press, 2018.
+  Usada em: conceitos de processamento de imagens, transformações geométricas
+  e projetivas e visão computacional.
+
+Artigo original do detector de bordas
+
+CANNY, John. A Computational Approach to Edge Detection. IEEE Transactions on
+Pattern Analysis and Machine Intelligence, v. PAMI-8, n. 6, p. 679-698, 1986.
+
+Documentação oficial do OpenCV (funções efetivamente utilizadas)
+
+OpenCV Documentation. https://docs.opencv.org/
+  cv2.cvtColor ................ conversão de espaços de cor (BGR, cinza, LAB)
+  cv2.GaussianBlur ............ filtragem espacial gaussiana
+  cv2.Canny ................... detecção de bordas
+  cv2.dilate / cv2.morphologyEx  operações morfológicas (fechamento de lacunas)
+  cv2.findContours ............ extração de contornos
+  cv2.contourArea / cv2.arcLength  medidas de contornos
+  cv2.convexHull .............. fecho convexo
+  cv2.approxPolyDP ............ aproximação poligonal (Douglas-Peucker)
+  cv2.threshold (Otsu) ........ limiarização automática (plano B de detecção)
+  cv2.getPerspectiveTransform . cálculo da homografia a partir de 4 pontos
+  cv2.warpPerspective ......... transformação de perspectiva
+  cv2.createCLAHE ............. equalização adaptativa limitada de histograma
+  cv2.equalizeHist ............ equalização global de histograma
+  cv2.LUT ..................... transformação de intensidade por tabela (gama)
+  cv2.calcHist ................ cálculo de histogramas
+  cv2.resize .................. redimensionamento com interpolação
+                                (INTER_AREA, INTER_LINEAR, INTER_CUBIC,
+                                INTER_LANCZOS4, INTER_NEAREST)
+  cv2.imencode ................ codificação PNG e JPEG para download
+  cv2.addWeighted ............. mistura da imagem tratada com a original
+
+Outras bibliotecas (documentação oficial)
+
+Streamlit — https://docs.streamlit.io/
+NumPy — https://numpy.org/doc/
+Pillow — https://pillow.readthedocs.io/
+Matplotlib — https://matplotlib.org/stable/
+
+=====================================================================
+BUILD / EXECUÇÃO
+=====================================================================
+Python recomendado: 3.10 a 3.12 (desenvolvido e testado com Python 3.11.9).
+
+1) (Opcional, recomendado) Criar e ativar um ambiente virtual
+   Windows (PowerShell):
+     python -m venv .venv
+     .venv\Scripts\Activate.ps1
+   Linux / macOS:
+     python3 -m venv .venv
+     source .venv/bin/activate
+
+2) Instalar as dependências
+     pip install -r requirements.txt
+
+3) Executar a aplicação (abre em http://localhost:8501)
+     streamlit run app.py
+
+4) (Opcional) Executar os testes automatizados
+     pip install -r requirements-dev.txt
+     python -m pytest
+
+5) (Opcional) Validar o pipeline com fotografias próprias
+   Nenhuma fotografia externa é necessária para executar o projeto.
+   Se quiser, coloque fotos em examples/real/ e execute:
+     python examples/validate_real.py
+   A tabela-resumo é gravada em validation_output/resultados.md
+
+6) (Opcional) Regenerar as imagens sintéticas de exemplo
+     python examples/generate_examples.py
+
+Publicação (Streamlit Community Cloud): repositório no GitHub, app com arquivo
+principal app.py, Python 3.11 ou 3.12. Não há segredos nem variáveis de ambiente.
