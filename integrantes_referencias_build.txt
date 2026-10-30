@@ -97,3 +97,6 @@ Python recomendado: 3.10 a 3.12 (desenvolvido e testado com Python 3.11.9).
 
 Publicação (Streamlit Community Cloud): repositório no GitHub, app com arquivo
 principal app.py, Python 3.11 ou 3.12. Não há segredos nem variáveis de ambiente.
+
+Aplicação publicada: https://book-scan-w5slgyu9jun5sxrejmivhq.streamlit.app/
+Repositório: https://github.com/GabrielBuck/Book-Scan

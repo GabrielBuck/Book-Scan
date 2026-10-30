@@ -4,6 +4,9 @@
 
 Projeto 2 (Opção 4 — aplicação prática) da disciplina de **Computação Visual** — Turma 07G, Universidade Presbiteriana Mackenzie. Professor: André Kishimoto.
 
+- Aplicação publicada: https://book-scan-w5slgyu9jun5sxrejmivhq.streamlit.app/
+- Repositório: https://github.com/GabrielBuck/Book-Scan
+
 ## Integrantes
 
 - Gabriel Nottoli Buck — RA 10425384
@@ -11,7 +14,7 @@ Projeto 2 (Opção 4 — aplicação prática) da disciplina de **Computação V
 
 ## Contexto
 
-O **BookLog** é um aplicativo Android/iOS para catalogação e organização de livros. O **BookLog Scan** é um **protótipo web, independente do aplicativo**, de uma possível funcionalidade futura: digitalizar a capa de um livro físico a partir de uma fotografia. Ele **não está integrado** ao BookLog; o trabalho avaliado é o processamento de imagens.
+O **BookLog** é um aplicativo Android/iOS para catalogação e organização de livros. O **BookLog Scan** é um protótipo web, independente do aplicativo, para uma possível funcionalidade futura do BookLog: gerar a imagem de uma capa a partir da fotografia de um livro físico. Ele **não está integrado** ao BookLog. O foco do projeto é o processamento de imagens.
 
 ## Problema
 
@@ -72,7 +75,7 @@ A pontuação é: área relativa (reduzida pela metade se > 95%) × solidez × r
 
 O Canny também roda em cada canal de cor porque duas cores diferentes podem ter o mesmo brilho em cinza (por exemplo, capa vermelha sobre mesa cinza): nesse caso a borda só existe em algum canal.
 
-A prioridade do detector é **evitar falsos positivos**: se nenhum candidato passar nos critérios, o app não escolhe uma região "mais ou menos" e pede o ajuste manual.
+O detector prioriza evitar falsos positivos: se nenhum candidato passar nos critérios, o app não seleciona nenhuma região e pede o ajuste manual.
 
 ## Ajuste manual
 
@@ -102,7 +105,7 @@ Python 3.10–3.12 (desenvolvido com 3.11), OpenCV (`opencv-python-headless`), N
 ## Estrutura do repositório
 
 ```
-booklog-scan/
+Book-Scan/
 ├── app.py                          # interface Streamlit
 ├── src/
 │   ├── preprocessing.py            # leitura, cinza, filtro gaussiano
@@ -122,6 +125,7 @@ booklog-scan/
 ├── .streamlit/config.toml
 ├── requirements.txt                # dependências da aplicação
 ├── requirements-dev.txt            # + pytest
+├── pytest.ini
 ├── integrantes_referencias_build.txt
 └── README.md
 ```
@@ -181,7 +185,7 @@ As fotografias externas usadas não fazem parte do repositório nem são necess�
 - Capa deitada é girada 90° no sentido horário (modo automático); se o texto ficar de lado, mude a orientação na barra lateral.
 - A seleção manual é por cliques (não por arrastar); para corrigir um ponto, use **Recomeçar seleção** ou o ajuste preciso por coordenadas.
 - Fotos acima de 3000 px no maior lado são reduzidas; arquivos acima de 30 MB são recusados.
-- Os limiares foram definidos com imagens sintéticas e ajustados com poucas fotografias reais; novas fotos podem pedir novos ajustes.
+- Os limiares foram definidos com imagens sintéticas e ajustados após testes com 8 fotografias externas; outras fotos podem exigir novos ajustes.
 
 ## Referências
 
@@ -190,5 +194,6 @@ As fotografias externas usadas não fazem parte do repositório nem são necess�
 - CANNY, John. A Computational Approach to Edge Detection. *IEEE Transactions on Pattern Analysis and Machine Intelligence*, v. PAMI-8, n. 6, p. 679–698, 1986.
 - Documentação oficial do OpenCV: https://docs.opencv.org/
 - Documentação do Streamlit: https://docs.streamlit.io/
+- streamlit-image-coordinates (seleção dos cantos por clique): https://github.com/blackary/streamlit-image-coordinates
 
 A lista completa, com as funções do OpenCV utilizadas, está em `integrantes_referencias_build.txt`.
