@@ -57,6 +57,8 @@ OpenCV Documentation. https://docs.opencv.org/
 Outras bibliotecas (documentação oficial)
 
 Streamlit — https://docs.streamlit.io/
+streamlit-image-coordinates (seleção dos cantos por clique) —
+  https://github.com/blackary/streamlit-image-coordinates
 NumPy — https://numpy.org/doc/
 Pillow — https://pillow.readthedocs.io/
 Matplotlib — https://matplotlib.org/stable/

@@ -8,13 +8,19 @@ import numpy as np
 import streamlit as st
 
 from src import cover_detection, enhancement, resize
-from src.perspective import ORIENTATIONS
+from src.perspective import ORIENTATIONS, order_points
 from src.pipeline import PipelineConfig, PipelineError, run_pipeline
 from src.preprocessing import ImageError, load_image
+
+try:  # seleção visual dos cantos; sem o componente, os controles deslizantes continuam funcionando
+    from streamlit_image_coordinates import streamlit_image_coordinates
+except ImportError:  # pragma: no cover
+    streamlit_image_coordinates = None
 
 logger = logging.getLogger("booklog_scan")
 
 MAX_UPLOAD_MB = 30
+PICK_WIDTH = 720  # largura máxima (px) da foto na seleção de cantos
 SIZE_PRESETS = {"400 × 600 (padrão)": (400, 600), "600 × 900": (600, 900), "800 × 1200": (800, 1200)}
 ORIENTATION_LABELS = {
     "auto": "Automática (deixa em pé)",
@@ -24,10 +30,20 @@ ORIENTATION_LABELS = {
     "180": "Girar 180°",
 }
 FIT_LABELS = {"stretch": "Preencher todo o quadro", "fit": "Preservar proporção (com bordas)"}
+CORNER_NAMES = ("Superior esquerdo", "Superior direito", "Inferior direito", "Inferior esquerdo")
 
-st.set_page_config(page_title="BookLog Scan", page_icon="📚", layout="wide")
+# imagens nunca passam de 78% da altura da janela e mantêm a proporção
+STYLE = """
+<style>
+[data-testid="stImage"] img { max-height: 78vh; width: auto; max-width: 100%; object-fit: contain; }
+</style>
+"""
+
+st.set_page_config(
+    page_title="BookLog Scan", page_icon="📚", layout="wide", initial_sidebar_state="collapsed")
 
 
+# ---------------------------------------------------------------- utilidades
 def list_examples() -> dict:
     """Imagens de examples/real/ (fotos do grupo) e examples/sintetico_* (sintéticas), por nome."""
     base = Path(__file__).parent / "examples"
@@ -51,9 +67,19 @@ def encode(image: np.ndarray, fmt: str) -> bytes:
     return buffer.tobytes()
 
 
+def stepper(current: int) -> None:
+    """Indicador de progresso: Fotografia → Detecção → Resultado."""
+    labels = ("Fotografia", "Detecção", "Resultado")
+    st.caption("  →  ".join(f"**{i}. {name}**" if i == current else f"{i}. {name}"
+                            for i, name in enumerate(labels, start=1)))
+
+
 def sidebar_config() -> PipelineConfig:
-    st.sidebar.header("Configurações")
-    size = SIZE_PRESETS[st.sidebar.selectbox("Tamanho da capa final", list(SIZE_PRESETS))]
+    st.sidebar.header("Configurações avançadas")
+    st.sidebar.caption("Opcional: os valores padrão já geram o resultado.")
+
+    st.sidebar.subheader("Saída")
+    size = SIZE_PRESETS[st.sidebar.selectbox("Tamanho final da capa", list(SIZE_PRESETS))]
     fit_mode = st.sidebar.radio("Ajuste ao quadro", list(FIT_LABELS), format_func=FIT_LABELS.get)
     interpolation = st.sidebar.selectbox(
         "Interpolação", list(resize.INTERPOLATIONS), format_func=lambda k: resize.INTERPOLATIONS[k][0])
@@ -70,13 +96,12 @@ def sidebar_config() -> PipelineConfig:
     if method == "gamma":
         gamma = st.sidebar.slider("γ (menor que 1 clareia)", 0.4, 2.5, 0.8, 0.05)
 
-    with st.sidebar.expander("Detecção (avançado)"):
-        blur = st.slider("Núcleo do filtro gaussiano", 3, 15, 5, 2)
-        custom = st.checkbox("Definir limiares do Canny manualmente")
-        low = high = None
-        if custom:
-            low = st.slider("Limiar baixo", 1, 200, 20)
-            high = st.slider("Limiar alto", 2, 255, 50)
+    st.sidebar.subheader("Detecção")
+    blur = st.sidebar.slider("Núcleo do filtro gaussiano", 3, 15, 5, 2)
+    low = high = None
+    if st.sidebar.checkbox("Definir limiares do Canny manualmente"):
+        low = st.sidebar.slider("Limiar baixo", 1, 200, 20)
+        high = st.sidebar.slider("Limiar alto", 2, 255, 50)
 
     return PipelineConfig(
         output_size=size, interpolation=interpolation, fit_mode=fit_mode, blur_ksize=blur,
@@ -84,39 +109,158 @@ def sidebar_config() -> PipelineConfig:
         clip_limit=clip_limit, gamma=gamma, orientation=orientation)
 
 
-def manual_quad_ui(image: np.ndarray, default_quad, file_key: str):
-    """Ajuste manual dos 4 cantos (percentuais da imagem). Retorna os cantos em pixels ou None."""
+# ---------------------------------------------------------------- processamento (com cache na sessão)
+def cached_pipeline(image, config, file_key, manual_quad=None):
+    """Evita reprocessar a cada interação (cada clique de canto reexecuta o script)."""
+    suffix = None if manual_quad is None else np.round(manual_quad, 1).tobytes()
+    key = (file_key, repr(config), suffix)
+    slot = "auto_cache" if manual_quad is None else "manual_cache"
+    cached = st.session_state.get(slot)
+    if cached and cached[0] == key:
+        return cached[1]
+    result = run_pipeline(image, config, manual_quad=manual_quad)
+    st.session_state[slot] = (key, result)
+    return result
+
+
+# ---------------------------------------------------------------- seleção dos cantos
+def preview_with_points(image: np.ndarray, points, reference=None):
+    """Foto reduzida (RGB) com os cantos já marcados, numerados 1–4. Retorna (imagem, escala)."""
     h, w = image.shape[:2]
-    if default_quad is None:
-        default = np.array([[15, 15], [85, 15], [85, 85], [15, 85]], dtype=float)
+    scale = min(1.0, PICK_WIDTH / w)
+    canvas = cv2.resize(image, (round(w * scale), round(h * scale)), interpolation=cv2.INTER_AREA) \
+        if scale < 1 else image.copy()
+    if reference is not None and not points:  # contorno de referência (detecção atual), discreto
+        cv2.polylines(canvas, [(order_points(reference) * scale).astype(np.int32)], True, (90, 200, 90), 1, cv2.LINE_AA)
+    pts = np.array(points, dtype=np.float32).reshape(-1, 2) * scale
+    if len(pts) >= 2:
+        cv2.polylines(canvas, [pts.astype(np.int32)], len(pts) == 4, (0, 160, 255), 2, cv2.LINE_AA)
+    radius = max(15, canvas.shape[1] // 38)
+    for number, (x, y) in enumerate(pts, start=1):
+        center = (int(x), int(y))
+        cv2.circle(canvas, center, radius, (0, 140, 255), -1, cv2.LINE_AA)
+        cv2.circle(canvas, center, radius, (255, 255, 255), 2, cv2.LINE_AA)
+        text = str(number)
+        (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, radius / 22, 2)
+        cv2.putText(canvas, text, (center[0] - tw // 2, center[1] + th // 2), cv2.FONT_HERSHEY_SIMPLEX,
+                    radius / 22, (255, 255, 255), 2, cv2.LINE_AA)
+    return cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB), scale
+
+
+def corner_picker(image: np.ndarray, file_key: str, reference, can_return_to_auto: bool) -> None:
+    """Seleção visual: o usuário clica nos 4 cantos da capa, nesta ordem, sobre a própria foto."""
+    pts_key, last_key, ver_key = f"{file_key}pts", f"{file_key}lastclick", f"{file_key}ver"
+    applied_key = f"{file_key}applied"
+    points = st.session_state.setdefault(pts_key, [])
+
+    photo, panel = st.columns([3, 2])
+    with photo:
+        preview, _ = preview_with_points(image, points, reference)
+        click = streamlit_image_coordinates(preview, key=f"{file_key}click", width="stretch")
+        if click is not None:
+            click_id = click.get("unix_time", (click["x"], click["y"]))
+            if click_id != st.session_state.get(last_key):  # o componente repete o último clique a cada execução
+                st.session_state[last_key] = click_id
+                if len(points) < 4:
+                    k = image.shape[1] / click["width"]  # coordenadas exibidas -> pixels da imagem original
+                    points.append((click["x"] * k, click["y"] * k))
+                    st.session_state[ver_key] = st.session_state.get(ver_key, 0) + 1
+                    st.rerun()
+
+    with panel:
+        st.markdown("**Selecione os quatro cantos da capa nesta ordem:**")
+        lines = []
+        for i, name in enumerate(CORNER_NAMES):
+            mark = "✓" if i < len(points) else ("●" if i == len(points) else "○")
+            lines.append(f"{mark} {i + 1}. {name}")
+        st.markdown("  \n".join(lines))
+        st.caption("Clique diretamente na fotografia." if len(points) < 4 else "Seleção completa.")
+        if st.button("Aplicar correção", type="primary", disabled=len(points) < 4,
+                     key=f"{file_key}apply", width="stretch"):
+            st.session_state[applied_key] = np.array(points, dtype=np.float32)
+            st.rerun()
+        if st.button("Recomeçar seleção", key=f"{file_key}restart", width="stretch"):
+            st.session_state[pts_key] = []
+            st.session_state[ver_key] = st.session_state.get(ver_key, 0) + 1
+            st.rerun()
+        if can_return_to_auto and st.button("Voltar à detecção automática", key=f"{file_key}auto", width="stretch"):
+            st.session_state.pop(applied_key, None)
+            st.session_state[pts_key] = []
+            st.rerun()
+
+
+def slider_panel(image: np.ndarray, file_key: str, reference) -> None:
+    """Ajuste preciso (fallback técnico): coordenadas dos 4 cantos em % da largura/altura da foto."""
+    h, w = image.shape[:2]
+    points = st.session_state.get(f"{file_key}pts", [])
+    version = st.session_state.get(f"{file_key}ver", 0)  # muda quando a seleção por clique muda
+    if len(points) == 4:
+        default = np.array(points) / [w, h] * 100
+    elif reference is not None:
+        default = np.asarray(reference) / [w, h] * 100
     else:
-        default = np.asarray(default_quad) / [w, h] * 100
+        default = np.array([[15, 15], [85, 15], [85, 85], [15, 85]], dtype=float)
     default = np.clip(default, 0, 100)
 
-    cols = st.columns([3, 2])
-    points = []
-    with cols[0]:
-        grid = st.columns(4)
-        for i, name in enumerate(("Superior esquerdo", "Superior direito", "Inferior direito", "Inferior esquerdo")):
-            with grid[i]:
-                st.caption(name)
-                x = st.slider("X (%)", 0.0, 100.0, float(round(default[i][0], 1)), 0.5, key=f"{file_key}x{i}")
-                y = st.slider("Y (%)", 0.0, 100.0, float(round(default[i][1], 1)), 0.5, key=f"{file_key}y{i}")
-                points.append((x / 100 * (w - 1), y / 100 * (h - 1)))
-    quad = np.array(points, dtype=np.float32)
-    with cols[1]:
-        show(cover_detection.draw_quad(image, quad, color=(0, 160, 255)), "Região selecionada (pré-visualização)")
-    return quad
+    coords = []
+    for i, name in enumerate(CORNER_NAMES):
+        x_col, y_col = st.columns(2)
+        x = x_col.slider(f"{i + 1}. {name} — X (%)", 0.0, 100.0, float(round(default[i][0], 1)), 0.5,
+                         key=f"{file_key}x{i}v{version}")
+        y = y_col.slider(f"{i + 1}. {name} — Y (%)", 0.0, 100.0, float(round(default[i][1], 1)), 0.5,
+                         key=f"{file_key}y{i}v{version}")
+        coords.append((x / 100 * (w - 1), y / 100 * (h - 1)))
+    quad = np.array(coords, dtype=np.float32)
+    show(cover_detection.draw_quad(image, quad, color=(0, 160, 255)), "Região selecionada (pré-visualização)")
+    if st.button("Aplicar coordenadas", key=f"{file_key}applycoords"):
+        st.session_state[f"{file_key}applied"] = quad
+        st.rerun()
+
+
+def selection_panel(image: np.ndarray, file_key: str, reference, can_return_to_auto: bool = False) -> None:
+    if streamlit_image_coordinates is None:
+        st.caption("Ajuste os quatro cantos pelas coordenadas abaixo.")
+        slider_panel(image, file_key, reference)
+        return
+    corner_picker(image, file_key, reference, can_return_to_auto)
+    with st.expander("Ajuste preciso das coordenadas"):
+        slider_panel(image, file_key, reference)
+
+
+# ---------------------------------------------------------------- exibição
+def render_result(result, manual: bool) -> None:
+    left, right = st.columns(2)
+    with left:
+        show(cover_detection.draw_quad(result.original, result.quad), "Fotografia original — capa selecionada")
+    with right:
+        show(result.final, f"Capa final — {result.final.shape[1]}×{result.final.shape[0]} px")
+
+    status = "cantos definidos manualmente" if manual else result.messages[0]
+    st.markdown(
+        f"**Detecção:** {status}  \n"
+        f"**Tamanho final:** {result.final.shape[1]}×{result.final.shape[0]} px  \n"
+        f"**Tratamento:** {result.enhancement_note}  \n"
+        f"**Interpolação:** {result.interpolation_note}"
+    )
+    for message in result.messages[1:]:
+        if message not in (status, "Usando os cantos ajustados manualmente."):
+            st.info(message)
+
+    with st.container(border=True):
+        st.markdown("**Baixar a capa processada**")
+        png, jpeg = st.columns(2)
+        png.download_button("Baixar PNG", encode(result.final, ".png"), "capa_booklog.png", "image/png",
+                            type="primary", icon=":material/download:", width="stretch")
+        jpeg.download_button("Baixar JPEG", encode(result.final, ".jpg"), "capa_booklog.jpg", "image/jpeg",
+                             type="primary", icon=":material/download:", width="stretch")
 
 
 def render_steps(result) -> None:
-    st.subheader("3. Etapas do processamento")
     row = []
 
     def flush():
         if row:
-            cols = st.columns(3)
-            for col, (number, step) in zip(cols, row):
+            for col, (number, step) in zip(st.columns(3), row):
                 with col:
                     show(step.image, f"{number}. {step.title}")
                     st.caption(step.description)
@@ -128,43 +272,22 @@ def render_steps(result) -> None:
             st.markdown(f"**{number}. {step.title}**")
             show(step.image)
             st.caption(step.description)
-            cols = st.columns(2)
-            for col, label, stats in ((cols[0], "Antes", result.stats_before), (cols[1], "Depois", result.stats_after)):
+            for col, label, stats in zip(st.columns(2), ("Antes", "Depois"), (result.stats_before, result.stats_after)):
                 col.caption(f"{label}: " + " · ".join(f"{k} {v:.1f}" for k, v in stats.items()))
         else:
             row.append((number, step))
             if len(row) == 3:
                 flush()
     flush()
-
-
-def render_result(result) -> None:
-    st.subheader("4. Resultado")
-    left, right = st.columns(2)
-    with left:
-        show(cover_detection.draw_quad(result.original, result.quad), "Fotografia original (capa selecionada)")
-    with right:
-        show(result.final, f"Capa final — {result.final.shape[1]}×{result.final.shape[0]} px")
-
-    st.info(
-        f"**Tratamento:** {result.enhancement_note}  \n"
-        f"**Interpolação:** {result.interpolation_note}"
-    )
-    for message in result.messages[1:]:
-        st.warning(message)
-
-    c1, c2, _ = st.columns([1, 1, 3])
-    c1.download_button("Baixar PNG", encode(result.final, ".png"), "capa_booklog.png", "image/png", type="primary")
-    c2.download_button("Baixar JPEG", encode(result.final, ".jpg"), "capa_booklog.jpg", "image/jpeg")
-    with st.expander("Matriz de homografia 3×3 utilizada"):
+    if result.homography is not None:
+        st.caption("Matriz de homografia 3×3 utilizada na correção de perspectiva:")
         st.code(np.array2string(result.homography, precision=4, suppress_small=True))
 
 
 def render_techniques() -> None:
-    st.divider()
-    st.subheader("Técnicas de Computação Visual utilizadas")
-    st.markdown(
-        """
+    with st.expander("Sobre as técnicas utilizadas"):
+        st.markdown(
+            """
 | Etapa | Técnica | Conteúdo da disciplina |
 |---|---|---|
 | Escala de cinza | Média ponderada dos canais (Y = 0,299R + 0,587G + 0,114B) | Modelos de cor |
@@ -176,28 +299,25 @@ def render_techniques() -> None:
 | Histograma | Histograma e distribuição acumulada da luminância antes e depois | Histograma |
 | Redimensionamento | Interpolação (`INTER_AREA` ao reduzir, `INTER_CUBIC` ao ampliar) | Interpolação |
 """
-    )
+        )
 
 
+# ---------------------------------------------------------------- página
 def main() -> None:
+    st.markdown(STYLE, unsafe_allow_html=True)
     st.title("📚 BookLog Scan")
     st.markdown("**Transforme uma foto do seu livro em uma capa pronta para catalogação.**")
-    st.caption(
-        "Protótipo web de uma futura funcionalidade do BookLog — Computação Visual, Universidade "
-        "Presbiteriana Mackenzie. Envie uma foto com a capa inteira visível e o pipeline "
-        "mostra cada etapa até gerar a imagem padronizada."
-    )
     config = sidebar_config()
 
-    st.subheader("1. Fotografia do livro")
-    upload = st.file_uploader("Envie uma imagem JPG, JPEG ou PNG", type=["jpg", "jpeg", "png"])
+    upload = st.file_uploader("Fotografia do livro (JPG, JPEG ou PNG)", type=["jpg", "jpeg", "png"])
     examples = list_examples()
     example = None
     if upload is None and examples:
-        choice = st.selectbox("…ou use uma imagem de exemplo", ["Nenhuma"] + list(examples))
+        choice = st.selectbox("…ou escolha uma imagem de exemplo", ["Nenhuma"] + list(examples))
         example = examples.get(choice)
     if upload is None and example is None:
-        st.info("Aguardando uma imagem. Envie uma foto" + (" ou escolha um exemplo." if examples else "."))
+        stepper(1)
+        st.info("Envie uma foto" + (" ou escolha um exemplo" if examples else "") + " para começar.")
         render_techniques()
         return
 
@@ -210,22 +330,25 @@ def main() -> None:
     except ImageError as exc:
         st.error(str(exc))
         return
-
     file_key = hashlib.md5(data).hexdigest()[:10]
     for note in notes:
         st.info(note)
-    show(image, f"Imagem original — {image.shape[1]}×{image.shape[0]} px")
 
-    st.subheader("2. Processamento")
     if st.button("Processar capa", type="primary"):
         st.session_state["processed"] = file_key
     if st.session_state.get("processed") != file_key:
+        stepper(1)
+        show(image, f"Fotografia selecionada — {image.shape[1]}×{image.shape[0]} px")
         render_techniques()
         return
 
+    applied_key = f"{file_key}applied"
     try:
         with st.spinner("Processando..."):
-            auto = run_pipeline(image, config)
+            auto = cached_pipeline(image, config, file_key)
+            manual_quad = st.session_state.get(applied_key)
+            if manual_quad is not None:
+                result = cached_pipeline(image, config, file_key, manual_quad)
     except PipelineError as exc:
         st.error(str(exc))
         return
@@ -234,52 +357,33 @@ def main() -> None:
         st.error("Ocorreu um erro inesperado ao processar a imagem. Tente outra foto.")
         return
 
-    applied_key = f"{file_key}applied"  # cantos confirmados pelo usuário
-    if auto.success:
-        st.success(auto.messages[0])
-        panel = st.expander("Ajustar os cantos manualmente (opcional)")
-    else:
-        st.info(
-            "Não foi possível identificar a capa automaticamente com confiança. "
-            "Ajuste os quatro cantos da capa para continuar."
-        )
+    # --- detecção automática sem confiança e nada aplicado: leva direto à seleção dos cantos
+    if not auto.success and manual_quad is None:
+        stepper(2)
+        st.info("Não foi possível identificar a capa automaticamente com confiança.")
+        st.markdown("**Selecione os quatro cantos da capa para continuar.**")
         st.caption("Isso costuma ocorrer com pouco contraste, bordas fragmentadas, reflexos ou capa parcialmente visível.")
-        panel = st.container(border=True)
-
-    with panel:
-        st.caption(
-            "Posicione os quatro cantos sobre a capa (em % da largura e da altura da foto), confira a "
-            "pré-visualização e clique em **Aplicar correção**."
-        )
-        corners = manual_quad_ui(image, auto.quad, file_key)
-        apply_col, reset_col, _ = st.columns([2, 3, 2])
-        if apply_col.button("Aplicar correção", type="primary", key=f"{file_key}apply"):
-            st.session_state[applied_key] = corners
-        if auto.success and applied_key in st.session_state:
-            if reset_col.button("Voltar à detecção automática", key=f"{file_key}reset"):
-                del st.session_state[applied_key]
-    manual_quad = st.session_state.get(applied_key)
-
-    result = auto
-    if manual_quad is not None:
-        try:
-            result = run_pipeline(image, config, manual_quad=manual_quad)
-        except PipelineError as exc:
-            st.error(str(exc))
-            return
-        except Exception:
-            logger.exception("Falha no pipeline com cantos manuais")
-            st.error("Não foi possível processar com esses cantos. Ajuste os pontos e tente novamente.")
-            return
-
-    if not result.success:
-        st.caption("O processamento continua assim que os cantos forem aplicados. Etapas já executadas:")
-        render_steps(result)
+        with st.container(border=True):
+            selection_panel(image, file_key, reference=None)
+        with st.expander("Ver processamento técnico"):
+            render_steps(auto)
+        render_techniques()
         return
-    if result.mode == "manual":
-        st.success(result.messages[0])
-    render_steps(result)
-    render_result(result)
+
+    # --- resultado
+    if manual_quad is None:
+        result = auto
+    stepper(3)
+    st.success("✓ Seleção manual aplicada" if manual_quad is not None else "✓ Capa identificada automaticamente")
+    render_result(result, manual=manual_quad is not None)
+
+    if st.toggle("Ajustar seleção", key=f"{file_key}adjust"):
+        with st.container(border=True):
+            selection_panel(image, file_key, reference=result.quad,
+                            can_return_to_auto=auto.success and manual_quad is not None)
+
+    with st.expander("Ver processamento técnico"):
+        render_steps(result)
     render_techniques()
 
 

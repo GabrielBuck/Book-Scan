@@ -76,26 +76,28 @@ A prioridade do detector é **evitar falsos positivos**: se nenhum candidato pas
 
 ## Ajuste manual
 
-Quando a capa não é identificada com confiança, o app informa isso e mostra o painel de ajuste, sem interromper o fluxo:
+Quando a capa não é identificada com confiança, o app informa isso (sem tratar como erro) e leva direto à seleção dos cantos:
 
-1. posicione os quatro cantos (superior esquerdo, superior direito, inferior direito, inferior esquerdo) com os controles deslizantes, em % da largura e da altura da foto;
-2. confira a região selecionada na pré-visualização;
-3. clique em **Aplicar correção**;
-4. o pipeline continua normalmente: perspectiva, tratamento, histogramas, redimensionamento e download.
+1. clique, sobre a própria fotografia, nos quatro cantos da capa **nesta ordem**: 1 superior esquerdo, 2 superior direito, 3 inferior direito, 4 inferior esquerdo. O progresso aparece como ✓ / ● / ○ e cada ponto é desenhado numerado sobre a foto;
+2. com os quatro pontos marcados, clique em **Aplicar correção** (o botão só habilita nesse momento); **Recomeçar seleção** descarta os pontos;
+3. o pipeline continua normalmente: perspectiva, tratamento, histogramas, redimensionamento e download.
 
-O mesmo painel está disponível, como opção, quando a detecção automática funciona; há um botão para voltar à detecção automática.
+O expander **Ajuste preciso das coordenadas** oferece os mesmos quatro cantos por controles deslizantes (% da largura e da altura), como alternativa técnica. Se a detecção automática funcionar, o resultado é mostrado direto e a seleção fica disponível em **Ajustar seleção**, com opção de voltar à detecção automática.
+
+A seleção por clique usa o componente `streamlit-image-coordinates`; se ele não estiver instalado, o app usa só os controles deslizantes.
 
 ## Funcionalidades
 
-- Upload de JPG, JPEG e PNG; imagem original exibida; botão **Processar capa**; exemplos sintéticos selecionáveis.
-- 10 etapas visíveis, cada uma com a explicação do que foi feito e os parâmetros usados.
-- Tamanho de saída 400×600, 600×900 ou 800×1200; interpolação, orientação e tratamento de intensidade configuráveis.
+- Upload de JPG, JPEG e PNG; exemplos sintéticos selecionáveis; botão **Processar capa**.
+- Resultado em destaque (fotografia original com a capa selecionada ao lado da capa final), com status da detecção, tamanho, tratamento e interpolação.
+- As 10 etapas do processamento, com a explicação e os parâmetros de cada uma, ficam no expander **Ver processamento técnico**; a tabela de técnicas, em **Sobre as técnicas utilizadas**.
+- Tamanho de saída 400×600, 600×900 ou 800×1200; interpolação, orientação, tratamento de intensidade, filtro gaussiano e limiares do Canny configuráveis na barra lateral (**Configurações avançadas**, recolhida por padrão).
 - Download do resultado em PNG ou JPEG.
 - Erros (arquivo inválido, imagem pequena, falha no processamento) viram mensagens claras, sem traceback.
 
 ## Tecnologias
 
-Python 3.10–3.12 (desenvolvido com 3.11), OpenCV (`opencv-python-headless`), NumPy, Streamlit, Pillow e Matplotlib (somente para desenhar os histogramas). Testes: pytest.
+Python 3.10–3.12 (desenvolvido com 3.11), OpenCV (`opencv-python-headless`), NumPy, Streamlit, `streamlit-image-coordinates` (seleção dos cantos por clique), Pillow e Matplotlib (somente para desenhar os histogramas). Testes: pytest.
 
 ## Estrutura do repositório
 
@@ -141,9 +143,9 @@ A aplicação abre em http://localhost:8501.
 
 1. Envie uma foto com a capa inteira visível, ou escolha um dos exemplos sintéticos.
 2. Confira a imagem original e clique em **Processar capa**.
-3. Se a capa for identificada, veja as etapas e o resultado. Se não, ajuste os quatro cantos e clique em **Aplicar correção**.
-4. Alterar tamanho, interpolação ou tratamento na barra lateral recalcula tudo.
-5. Baixe a capa em PNG ou JPEG.
+3. Se a capa for identificada, o resultado aparece direto. Se não, clique nos quatro cantos da capa na foto e em **Aplicar correção**.
+4. Baixe a capa em PNG ou JPEG.
+5. Opcional: **Ajustar seleção** corrige o recorte; **Ver processamento técnico** mostra as 10 etapas; a barra lateral (**Configurações avançadas**) altera tamanho, interpolação, tratamento e parâmetros de detecção, e o resultado é recalculado.
 
 Dicas: capa inteira no quadro, contraste entre a capa e o fundo, luz uniforme e câmera aproximadamente de frente.
 
@@ -177,7 +179,7 @@ As fotografias externas usadas não fazem parte do repositório nem são necess�
 - Uma capa que ocupe a foto inteira (cantos a menos de 2% das bordas) é tratada como moldura da foto e rejeitada.
 - Se a capa tiver moldura interna bem marcada e a borda externa não for detectada, a moldura pode ser escolhida.
 - Capa deitada é girada 90° no sentido horário (modo automático); se o texto ficar de lado, mude a orientação na barra lateral.
-- O ajuste manual usa controles deslizantes, não arrastar pontos sobre a foto.
+- A seleção manual é por cliques (não por arrastar); para corrigir um ponto, use **Recomeçar seleção** ou o ajuste preciso por coordenadas.
 - Fotos acima de 3000 px no maior lado são reduzidas; arquivos acima de 30 MB são recusados.
 - Os limiares foram definidos com imagens sintéticas e ajustados com poucas fotografias reais; novas fotos podem pedir novos ajustes.
 
